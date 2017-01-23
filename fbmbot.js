@@ -4,11 +4,20 @@ module.exports = debug => {
   var debug_resp = (r, j) => { if(debug) console.log('<', r) }
   var token = process.env.token
   if(!token) throw Error('Need a process.env.token')
-  var fburl_POST = `https://graph.facebook.com/me/messages?access_token=${token}`; 
-  var users = {}
-  var bot = {
+  var fburl_POST = `https://graph.facebook.com/me/messages?access_token=${token}`;
+  var bot = { 
     app: app,
+    chain: function(user, txt, n) {
+    },
+    use: function(f) {
+      this.chain = (function(nxt) {
+        return function(user, txt,  n) {
+          f(user, txt, nxt.bind(this, user, txt));
+        }
+      })(this.chain);
+    },
     sendText: (toid, txt, wait, metadata) => {
+      if(!toid || !txt) throw Error('sendText() needs and id and txt at least')
       metadata = metadata || '';
       if(!toid) throw Error('sendText needs an id');
       if(wait) bot.sendTypingOn(toid);
@@ -37,9 +46,9 @@ module.exports = debug => {
     sendMessage: (toid, message) => {
       var obj = {data: {"recipient": { "id": toid }, "message": message}, headers: headers}
       if(debug) console.log('>>>', obj)
-      ajax.post(fburl_POST, obj).then(debug_resp);
-    } 
-  }
+      ajax.post(fburl_POST, obj).then(debug_resp)
+    }
+  } 
   
   var express = require('express')
   var app = express()
@@ -51,11 +60,10 @@ module.exports = debug => {
   app.get("/", (r,s) => {
     s.end(r.query['hub.challenge'] || 'ok')
   })
-   
+
   app.post("/", (r, s) => {
     if(r.body.entry[0].messaging[0].postback){
       var user = r.body.entry[0].messaging[0].sender
-      if(!users[user.id]) users[user.id] = user
       var postback = r.body.entry[0].messaging[0].postback
       return bot.onpostback(user, postback)
     }
@@ -63,9 +71,9 @@ module.exports = debug => {
       r.body.entry[0].messaging[0].message.is_echo) return s.end();
     var txt = r.body.entry[0].messaging[0].message.text
     var user = r.body.entry[0].messaging[0].sender
-    if(!users[user.id]) users[user.id] = user
     if(debug) console.log('<<<', JSON.stringify(r.body))
-    bot.onmessagetext(user, txt, r.body)
+    if(bot.onmessagetext) bot.onmessagetext(user, txt, r.body)
+    bot.chain(user, txt)
     s.end()
   })
   
